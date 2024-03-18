@@ -1,0 +1,106 @@
+﻿Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 28 June 2021
+'Customer: Advanced Industries, quote number 12779
+'This program creates a serial string to display it in a custom CR instead of displaying 1 line per serial number in report
+'This program is being fired off Hook 28532 Post Save Hook from OES0FSN screen and off Hook 38423 Pre Save Hook from SHP700S1 screen
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	F.Intrinsic.Control.CallSub(CheckTable)
+	F.Intrinsic.Control.CallSub(SetSerialString)
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+Program.Sub.CheckTable.Start
+'This subroutine checks if table exists in DB, creates it if it doesn't
+
+F.Intrinsic.Control.Try
+
+	V.Local.bExists.Declare(Boolean)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.ODBC.Connection!Con.TableExists("GCG_6421", V.Local.bExists)
+		F.Intrinsic.Control.If(V.Local.bExists, =, False)
+			F.ODBC.Connection!Con.Execute("CREATE TABLE GCG_6421 (PACKLIST CHAR(7), ORDER_NO CHAR(7), ORDER_LINE CHAR(4), ORDER_SEQ CHAR(4), SERIAL_STRING LONGVARCHAR);")
+		F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.CheckTable.End
+Program.Sub.SetSerialString.Start
+'This subroutine checks if part is serialized, if so then creates a serial string containing all serial numbers from shipment
+
+F.Intrinsic.Control.Try
+
+	V.Local.sPackingNo.Declare(String)
+	V.Local.sSQL.Declare(String)
+	V.Local.iCounter.Declare(Long)
+	V.Local.sSerialNo.Declare(String)
+	V.Local.sSerialString.Declare(String)
+	V.Local.sPart.Declare(String)
+	
+	V.Local.sPackingNo.Set(V.Passed.000168)
+	F.Intrinsic.String.LPad(V.Local.sPackingNo,"0", 7, V.Local.sPackingNo)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	
+	F.Intrinsic.String.Build("select RTRIM(PART) PART from V_BOL_PACK_DTL where PCK_NO = '{0}' limit 1;", V.Local.sPackingNo, V.Local.sSQL)
+	F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sPart)
+	F.Intrinsic.String.Build("select RTRIM(FLAG_SERIALIZE) FLAG_SERIALIZE from V_INVENTORY_MSTR where PART = '{0}';", V.Local.sPart, V.Local.sSQL)
+	F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+	
+	F.Intrinsic.Control.If(V.Local.sSQL, =, "Y")
+	
+		F.Intrinsic.String.Build("select RTRIM(PCK_NO) PCK_NO, RTRIM(ORDER_NO) ORDER_NO, RTRIM(ORDER_SEQ) ORDER_SEQ, RTRIM(ORDER_LINE) ORDER_LINE, RTRIM(SERIAL) SERIAL from V_BOL_PACK_DTL where PCK_NO = '{0}' order by SERIAL;", V.Local.sPackingNo, V.Local.sSQL)
+		F.Data.DataTable.CreateFromSQL("dtPackingList", "Con", V.Local.sSQL, True)
+		
+		F.Intrinsic.Control.For(V.Local.iCounter, 0, V.DataTable.dtPackingList.RowCount--, 1) 
+		
+			V.Local.sSerialNo.Set(V.DataTable.dtPackingList(V.Local.iCounter).SERIAL!FieldVal)
+			F.Intrinsic.Control.If(V.Local.iCounter,=,0)
+				F.Intrinsic.String.Build("{0}", V.Local.sSerialNo, V.Local.sSerialString)			
+			F.Intrinsic.Control.Else
+				F.Intrinsic.String.Build("{0}, {1}", V.Local.sSerialString,  V.Local.sSerialNo, V.Local.sSerialString)			
+			F.Intrinsic.Control.EndIf	
+		
+		F.Intrinsic.Control.Next(V.Local.iCounter)
+		
+		F.Intrinsic.String.Build("insert into GCG_6421 (PACKLIST, ORDER_NO, ORDER_SEQ, ORDER_LINE, SERIAL_STRING) values('{0}','{1}','{2}','{3}','{4}');", V.DataTable.dtPackingList(0).PCK_NO!FieldVal, V.DataTable.dtPackingList(0).ORDER_NO!FieldVal, V.DataTable.dtPackingList(0).ORDER_SEQ!FieldVal, V.DataTable.dtPackingList(0).ORDER_LINE!FieldVal, V.Local.sSerialString, V.Local.sSQL)
+		F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+	
+	F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.SetSerialString.End
+Program.Sub.CatchError.Start
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Global.sError) 
+F.Intrinsic.UI.Msgbox(V.Global.sError)
+F.Intrinsic.Control.End()
+Program.Sub.CatchError.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$apadilla$}$20210712111305634$}$Lag9STqBJOmNXSbd5+msRcBWPGz0aFqSGjpgCwFu86AxnAwyw9GgeleCtii46WNZIPQTARxJehdiQg2pgqozGQ==
+Program.Sub.Comments.End
